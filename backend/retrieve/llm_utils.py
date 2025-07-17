@@ -1,10 +1,22 @@
 import os
+from dotenv import load_dotenv
 import google.generativeai as genai
 from groq import Groq, RateLimitError, APIStatusError
 
+# Load environment variables from .env in the project root
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env'))
+
 # Set your API keys as environment variables or directly here
-GROQ_API_KEY = "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"
-GEMINI_API_KEY = "AIzaSyB1mWmsHpJ_offDC-wgsSLK-0sotVo3UmQ"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# Log whether API keys are loaded (do not print the actual keys)
+print(f"[llm_utils] GROQ_API_KEY loaded: {'YES' if GROQ_API_KEY else 'NO'}")
+print(f"[llm_utils] GEMINI_API_KEY loaded: {'YES' if GEMINI_API_KEY else 'NO'}")
+
+# .env file in projstillect root should contain:
+# GROQ_API_KEY=your_groq_api_key
+# GEMINI_API_KEY=your_gemini_api_key
 
 groq_models = [
     "llama3-70b-8192",  # Llama 3 70B
@@ -106,4 +118,16 @@ def personalize_with_llm(llm, user_query, retrieved_content, model="", messages=
             else:
                 return call_gemini(prompt)
     else:
-        return "Invalid LLM selection." 
+        return "Invalid LLM selection."
+
+def list_groq_models():
+    """Return the list of configured Groq models."""
+    return groq_models
+
+def list_gemini_models():
+    """Return the list of available Gemini models (those that support generateContent), with 'models/' or 'model/' prefix removed."""
+    genai.configure(api_key=GEMINI_API_KEY)
+    try:
+        return [m.name.replace('models/', '').replace('model/', '') for m in genai.list_models() if 'generateContent' in getattr(m, 'supported_generation_methods', [])]
+    except Exception:
+        return [name.replace('models/', '').replace('model/', '') for name in gemini_models] 

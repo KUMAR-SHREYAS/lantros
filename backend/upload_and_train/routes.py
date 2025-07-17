@@ -9,6 +9,7 @@ from .embeddings import encode_chunks, EMBEDDING_MODEL
 from .qdrant_utils import ensure_collection, upsert_embeddings, qdrant
 from qdrant_client.http import models as rest
 from retrieve.llm_utils import personalize_with_llm
+from retrieve.llm_utils import list_groq_models, list_gemini_models
 
 DATASETS_DIR = Path("datasets")
 DATASETS_DIR.mkdir(exist_ok=True)
@@ -166,3 +167,11 @@ def list_datasets():
     collections = qdrant.get_collections()
     collection_names = [col.name for col in collections.collections]
     return {"datasets": collection_names} 
+
+@router.get("/list_groq_models")
+def get_groq_models():
+    return {"models": list_groq_models()}
+
+@router.get("/list_gemini_models")
+def get_gemini_models():
+    return {"models": list_gemini_models()} 

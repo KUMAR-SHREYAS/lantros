@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import logo from './logo.png';
 import './App.css';
@@ -521,7 +521,8 @@ function ChatBotPage() {
   const { t } = useTranslation();
   const theme = useTheme();
   const [selectedLLM, setSelectedLLM] = React.useState<'groq' | 'gemini'>('groq');
-  const [selectedModel, setSelectedModel] = React.useState(DEFAULT_MODELS['groq']);
+  const [selectedModel, setSelectedModel] = React.useState('');
+  const [modelOptions, setModelOptions] = React.useState<string[]>([]);
   const [messages, setMessages] = React.useState<Array<{ role: 'user' | 'assistant', content: string }>>([]);
   const [input, setInput] = React.useState('');
   const [clipboard, setClipboard] = React.useState<string[]>([]);
@@ -537,6 +538,42 @@ function ChatBotPage() {
   const [selectedTrainedData, setSelectedTrainedData] = React.useState('');
   const [trainedDataOptions, setTrainedDataOptions] = React.useState<{ value: string, label: string }[]>([]);
   const navigate = useNavigate();
+
+  // Add a derived state for whether a chat is selected
+  const chatSelected = !!selectedChat;
+
+  useLayoutEffect(() => {
+    const storedHistory = sessionStorage.getItem('chatHistory');
+    const storedSelectedChat = sessionStorage.getItem('selectedChat');
+    if (storedHistory) {
+      try {
+        const parsedHistory = JSON.parse(storedHistory);
+        let selected = null;
+        if (storedSelectedChat && parsedHistory.some((chat: any) => chat.id === storedSelectedChat)) {
+          selected = parsedHistory.find((chat: any) => chat.id === storedSelectedChat);
+        }
+        setChatHistory(parsedHistory);
+        setSelectedChat(selected ? selected.id : null);
+        setMessages(selected ? selected.messages : []);
+      } catch {
+        setChatHistory([]);
+        setSelectedChat(null);
+        setMessages([]);
+      }
+    }
+  }, []);
+
+  // Save chat history and selected chat to sessionStorage whenever they change
+  React.useEffect(() => {
+    sessionStorage.setItem('chatHistory', JSON.stringify(chatHistory));
+  }, [chatHistory]);
+  React.useEffect(() => {
+    if (selectedChat) {
+      sessionStorage.setItem('selectedChat', selectedChat);
+    } else {
+      sessionStorage.removeItem('selectedChat');
+    }
+  }, [selectedChat]);
 
   React.useEffect(() => {
     // Fetch datasets from backend
@@ -556,7 +593,25 @@ function ChatBotPage() {
   }, []);
 
   React.useEffect(() => {
-    setSelectedModel(DEFAULT_MODELS[selectedLLM]);
+    // Fetch model options for the selected LLM
+    const fetchModels = async () => {
+      let url = '';
+      if (selectedLLM === 'groq') url = 'http://localhost:8000/list_groq_models';
+      else if (selectedLLM === 'gemini') url = 'http://localhost:8000/list_gemini_models';
+      if (!url) return;
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.models && Array.isArray(data.models)) {
+          setModelOptions(data.models);
+          setSelectedModel(data.models[0] || '');
+        }
+      } catch {
+        setModelOptions([]);
+        setSelectedModel('');
+      }
+    };
+    fetchModels();
   }, [selectedLLM]);
 
   const handleSend = async () => {
@@ -768,122 +823,138 @@ function ChatBotPage() {
 
       {/* Main Chat Area */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-        <Paper elevation={3} sx={{ flex: 1, p: 2, borderRadius: 2, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          {/* Model Selection */}
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>{t('Select Trained Data')}</Typography>
-            <select
-              value={selectedTrainedData}
-              onChange={e => setSelectedTrainedData(e.target.value)}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 4,
-                border: '1px solid #ccc',
-                fontSize: 14,
-                width: 200,
-                marginBottom: 12
-              }}
-            >
-              {trainedDataOptions.map((opt: { value: string; label: string }) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </Box>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>{t('Select LLM')}</Typography>
-            <select
-              value={selectedLLM}
-              onChange={e => setSelectedLLM(e.target.value as 'groq' | 'gemini')}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 4,
-                border: '1px solid #ccc',
-                fontSize: 14,
-                width: 200,
-                marginBottom: 12
-              }}
-            >
-              {LLM_OPTIONS.map((opt: { value: string; label: string }) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </Box>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>{t('Select Model')}</Typography>
-            <input
-              type="text"
-              value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value)}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 4,
-                border: '1px solid #ccc',
-                fontSize: 14,
-                width: 200
-              }}
-            />
-          </Box>
-
-          {/* Messages */}
-          <Box sx={{ flex: 1, overflowY: 'auto', mb: 2, p: 2, minHeight: 0 }}>
-            {messages.map((message, index) => (
-              <Box
-                key={index}
-                sx={{
-                  display: 'flex',
-                  justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
-                  mb: 2
-                }}
-              >
-                <Paper
-                  elevation={1}
-                  sx={{
-                    p: 2,
-                    maxWidth: '70%',
-                    background: message.role === 'user' ? 'var(--color1)' : theme.palette.background.paper,
-                    color: message.role === 'user' ? '#fff' : theme.palette.text.primary,
-                    borderRadius: 2,
-                    position: 'relative',
-                    display: 'flex',
-                    alignItems: 'center'
-                  }}
-                >
-                  <Typography sx={{ flex: 1 }}>{message.content}</Typography>
-                  {message.role === 'assistant' && (
-                    <IconButton size="small" onClick={() => handleAddToClipboard(message.content)} sx={{ ml: 1 }} title="Add to Clipboard">
-                      <ArrowForwardIcon fontSize="small" />
-                    </IconButton>
-                  )}
-                </Paper>
-              </Box>
-            ))}
-          </Box>
-
-          {/* Input Area */}
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={t('Type your message...')}
-              style={{
-                flex: 1,
-                padding: '12px',
-                borderRadius: 4,
-                border: '1px solid #ccc',
-                fontSize: 16
-              }}
-            />
+        {!chatSelected ? (
+          <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Button
               variant="contained"
-              onClick={handleSend}
-              sx={{ background: 'var(--color1)', color: '#fff' }}
+              color="primary"
+              size="large"
+              sx={{ fontSize: 22, px: 6, py: 3, background: 'var(--color1)', color: '#fff' }}
+              onClick={handleNewChat}
             >
-              {t('Send')}
+              {t('Start New Chat')}
             </Button>
           </Box>
-        </Paper>
+        ) : (
+          <Paper elevation={3} sx={{ flex: 1, p: 2, borderRadius: 2, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {/* Model Selection Controls - now in a row */}
+            <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <Box>
+                <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>{t('Select Trained Data')}</Typography>
+                <select
+                  value={selectedTrainedData}
+                  onChange={e => setSelectedTrainedData(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 4,
+                    border: '1px solid #ccc',
+                    fontSize: 14,
+                    width: 200
+                  }}
+                >
+                  {trainedDataOptions.map((opt: { value: string; label: string }) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </Box>
+              <Box>
+                <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>{t('Select LLM')}</Typography>
+                <select
+                  value={selectedLLM}
+                  onChange={e => setSelectedLLM(e.target.value as 'groq' | 'gemini')}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 4,
+                    border: '1px solid #ccc',
+                    fontSize: 14,
+                    width: 200
+                  }}
+                >
+                  <option value="groq">Groq</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </Box>
+              <Box>
+                <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>{t('Select Model')}</Typography>
+                <select
+                  value={selectedModel}
+                  onChange={e => setSelectedModel(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 4,
+                    border: '1px solid #ccc',
+                    fontSize: 14,
+                    width: 200
+                  }}
+                >
+                  {modelOptions.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </Box>
+            </Box>
+
+            {/* Messages */}
+            <Box sx={{ flex: 1, overflowY: 'auto', mb: 2, p: 2, minHeight: 0 }}>
+              {messages.map((message, index) => (
+                <Box
+                  key={index}
+                  sx={{
+                    display: 'flex',
+                    justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
+                    mb: 2
+                  }}
+                >
+                  <Paper
+                    elevation={1}
+                    sx={{
+                      p: 2,
+                      maxWidth: '70%',
+                      background: message.role === 'user' ? 'var(--color1)' : theme.palette.background.paper,
+                      color: message.role === 'user' ? '#fff' : theme.palette.text.primary,
+                      borderRadius: 2,
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Typography sx={{ flex: 1 }}>{message.content}</Typography>
+                    {message.role === 'assistant' && (
+                      <IconButton size="small" onClick={() => handleAddToClipboard(message.content)} sx={{ ml: 1 }} title="Add to Clipboard">
+                        <ArrowForwardIcon fontSize="small" />
+                      </IconButton>
+                    )}
+                  </Paper>
+                </Box>
+              ))}
+            </Box>
+
+            {/* Input Area */}
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+                placeholder={t('Type your message...')}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  borderRadius: 4,
+                  border: '1px solid #ccc',
+                  fontSize: 16
+                }}
+              />
+              <Button
+                variant="contained"
+                onClick={handleSend}
+                sx={{ background: 'var(--color1)', color: '#fff' }}
+              >
+                {t('Send')}
+              </Button>
+            </Box>
+          </Paper>
+        )}
       </Box>
 
       {/* Clipboard Sidebar */}
