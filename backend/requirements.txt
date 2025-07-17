@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+PyPDF2
+python-docx
+sentence-transformers
+qdrant-client
+requests
+beautifulsoup4 
+openai
+google-generativeai 

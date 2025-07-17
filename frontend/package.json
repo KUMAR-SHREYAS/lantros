@@ -42,6 +42,7 @@
     ]
   },
   "devDependencies": {
+    "@types/file-saver": "^2.0.7",
     "@types/node": "^16.18.80",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
@@ -49,5 +50,6 @@
     "file-loader": "^6.2.0",
     "svgr": "^1.10.0",
     "typescript": "^4.9.5"
-  }
+  },
+  "proxy": "http://localhost:8000"
 }

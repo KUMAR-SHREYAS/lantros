@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import logo from './logo.png';
 import './App.css';
 import { AppBar, Toolbar, Typography, Button, Box, Container, Paper, TextField, IconButton, Menu, MenuItem, Avatar, Divider } from '@mui/material';
@@ -18,6 +18,23 @@ import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import './LandingPage.css';
+import DeleteIcon from '@mui/icons-material/Delete';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import ContentPasteIcon from '@mui/icons-material/ContentPaste';
+import Checkbox from '@mui/material/Checkbox';
+import { saveAs } from 'file-saver';
+import { Document, Packer, Paragraph, TextRun } from 'docx';
+import jsPDF from 'jspdf';
+
+// LLM and model options for chat
+const LLM_OPTIONS: { value: string; label: string }[] = [
+  { value: 'groq', label: 'Groq (OpenAI-compatible)' },
+  { value: 'gemini', label: 'Gemini' },
+];
+const DEFAULT_MODELS: { [key: string]: string } = {
+  groq: 'gpt-3.5-turbo',
+  gemini: 'gemini-pro',
+};
 
 function NavigationMenu() {
   const { t } = useTranslation();
@@ -75,10 +92,27 @@ function NavigationMenu() {
   );
 }
 
+function HomeHeader() {
+  const navigate = useNavigate();
+  return (
+    <AppBar position="static" sx={{ background: '#edb32b', boxShadow: 'none' }}>
+      <Toolbar sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 64 }}>
+        <Typography variant="h5" sx={{ fontWeight: 700, letterSpacing: 2, cursor: 'pointer', color: '#fff' }} onClick={() => navigate('/')}>Lantros</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Button color="inherit" onClick={() => navigate('/login')} sx={{ fontWeight: 500, color: '#fff', '&:hover': { color: '#0fdfff' } }}>LOGIN</Button>
+          <Button variant="contained" onClick={() => navigate('/register')} sx={{ background: '#0fdfff', color: '#222', fontWeight: 500, ml: 2, '&:hover': { background: '#fff', color: '#0fdfff' } }}>SIGNUP</Button>
+        </Box>
+      </Toolbar>
+    </AppBar>
+  );
+}
+
 function App() {
+  const location = useLocation();
   return (
     <>
-      <AppHeader />
+      {location.pathname === '/' && <HomeHeader />}
+      {location.pathname !== '/' && location.pathname !== '/login' && location.pathname !== '/register' && <AppHeader />}
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
@@ -131,8 +165,6 @@ function AppHeader() {
             <Typography variant="h5" sx={{ fontWeight: 700, letterSpacing: 2, cursor: 'pointer', color: '#fff' }} onClick={() => navigate('/')}>Lantros</Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Button color="inherit" onClick={() => navigate('/login')} sx={{ fontWeight: 500, color: '#fff', '&:hover': { color: '#0fdfff' } }}>LOGIN</Button>
-            <Button variant="contained" onClick={() => navigate('/register')} sx={{ background: '#0fdfff', color: '#222', fontWeight: 500, ml: 2, '&:hover': { background: '#fff', color: '#0fdfff' } }}>SIGNUP</Button>
             <IconButton color="inherit" onClick={handleProfileClick} sx={{ ml: 1 }}>
               <Avatar src={user.avatar} sx={{ width: 32, height: 32 }} />
             </IconButton>
@@ -149,12 +181,6 @@ function AppHeader() {
           <List>
             <ListItem disablePadding>
               <ListItemButton onClick={() => handleNav('/')}> <ListItemText primary="Home" /> </ListItemButton>
-            </ListItem>
-            <ListItem disablePadding>
-              <ListItemButton onClick={() => handleNav('/login')}> <ListItemText primary="Login" /> </ListItemButton>
-            </ListItem>
-            <ListItem disablePadding>
-              <ListItemButton onClick={() => handleNav('/register')}> <ListItemText primary="Signup" /> </ListItemButton>
             </ListItem>
             <ListItem disablePadding>
               <ListItemButton onClick={() => handleNav('/chat')}> <ListItemText primary="Chat" /> </ListItemButton>
@@ -349,6 +375,84 @@ function RegisterPage() {
 function TrainPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
+  const [urls, setUrls] = React.useState<string[]>(['']);
+  const [datasetName, setDatasetName] = React.useState('');
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setSelectedFiles(Array.from(e.target.files));
+    }
+  };
+
+  const handleUrlChange = (index: number, value: string) => {
+    setUrls(prev => prev.map((url, i) => (i === index ? value : url)));
+  };
+
+  const handleAddUrl = () => {
+    setUrls(prev => [...prev, '']);
+  };
+
+  const handleRemoveUrl = (index: number) => {
+    setUrls(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUpload = async () => {
+    if (!datasetName.trim()) {
+      alert('Please enter a dataset name.');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('dataset_name', datasetName.trim());
+    selectedFiles.forEach(file => formData.append('files', file));
+    // Optionally, add URLs as a JSON string or as a separate endpoint/field
+    // formData.append('urls', JSON.stringify(urls.filter(Boolean)));
+
+    try {
+      const response = await fetch('http://localhost:8000/upload_dataset', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json();
+      if (response.ok) {
+        alert('Upload successful!');
+      } else {
+        alert(data.detail || 'Upload failed.');
+      }
+    } catch (err) {
+      alert('Upload error: ' + err);
+    }
+  };
+
+  const handleTrain = async () => {
+    if (!datasetName.trim()) {
+      alert('Please enter a dataset name.');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('dataset_name', datasetName.trim());
+
+    try {
+      const response = await fetch('http://localhost:8000/train_dataset', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json();
+      if (response.ok) {
+        alert('Training started!');
+        // Optionally update localStorage as before
+        const prev = JSON.parse(localStorage.getItem('trainedDatasets') || '[]');
+        if (!prev.includes(datasetName.trim())) {
+          localStorage.setItem('trainedDatasets', JSON.stringify([...prev, datasetName.trim()]));
+        }
+      } else {
+        alert(data.detail || 'Training failed.');
+      }
+    } catch (err) {
+      alert('Training error: ' + err);
+    }
+  };
+
   return (
     <Container maxWidth="md" sx={{ py: 6, minHeight: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <Typography variant="h4" sx={{ fontWeight: 700, color: '#edb32b', mb: 4, letterSpacing: 1 }}>
@@ -356,21 +460,59 @@ function TrainPage() {
       </Typography>
       <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', mb: 4 }}>
         <Paper elevation={3} sx={{ flex: 1, minWidth: 220, p: 3, borderTop: '4px solid #edb32b', borderRadius: 2 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>{t('Upload PDF')}</Typography>
-          <input type="file" accept="application/pdf" />
-        </Paper>
-        <Paper elevation={3} sx={{ flex: 1, minWidth: 220, p: 3, borderTop: '4px solid #0fdfff', borderRadius: 2 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>{t('Upload DOC')}</Typography>
-          <input type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+          <Typography variant="h6" sx={{ mb: 2 }}>{t('Upload PDF or DOC/DOCX')}</Typography>
+          <input type="file" accept="application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple onChange={handleFileChange} />
+          {selectedFiles.length > 0 && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>{t('Selected Files')}:</Typography>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {selectedFiles.map((file, idx) => (
+                  <li key={idx} style={{ fontSize: 13 }}>{file.name}</li>
+                ))}
+              </ul>
+            </Box>
+          )}
         </Paper>
         <Paper elevation={3} sx={{ flex: 1, minWidth: 220, p: 3, borderTop: '4px solid #222', borderRadius: 2 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>{t('Add URL')}</Typography>
-          <input type="url" placeholder="https://example.com" style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #ccc' }} />
+          <Typography variant="h6" sx={{ mb: 2 }}>{t('Add URLs')}</Typography>
+          {urls.map((url, idx) => (
+            <Box key={idx} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <input
+                type="url"
+                value={url}
+                onChange={e => handleUrlChange(idx, e.target.value)}
+                placeholder="https://example.com"
+                style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
+              />
+              {urls.length > 1 && (
+                <Button size="small" color="error" onClick={() => handleRemoveUrl(idx)} sx={{ ml: 1, minWidth: 0, px: 1 }}>-</Button>
+              )}
+            </Box>
+          ))}
+          <Button size="small" onClick={handleAddUrl} sx={{ mt: 1 }}>{t('Add Another URL')}</Button>
         </Paper>
       </Box>
-      <Button variant="contained" size="large" sx={{ background: '#0fdfff', color: '#222', fontWeight: 700 }} onClick={() => navigate('/chat')}>
-        {t('Go to Chatbot')}
-      </Button>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 2 }}>
+        <TextField
+          label={t('Dataset Name')}
+          value={datasetName}
+          onChange={e => setDatasetName(e.target.value)}
+          variant="outlined"
+          size="small"
+          sx={{ maxWidth: 300 }}
+        />
+      </Box>
+      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+        <Button variant="contained" size="large" sx={{ background: '#0fdfff', color: '#222', fontWeight: 700 }} onClick={handleUpload} disabled={selectedFiles.length === 0 && urls.filter(Boolean).length === 0}>
+          {t('Upload')}
+        </Button>
+        <Button variant="contained" size="large" sx={{ background: '#edb32b', color: '#222', fontWeight: 700 }} onClick={handleTrain}>
+          {t('Train')}
+        </Button>
+        <Button variant="contained" size="large" sx={{ background: '#0fdfff', color: '#222', fontWeight: 700 }} onClick={() => navigate('/chat')}>
+          {t('Go to Chatbot')}
+        </Button>
+      </Box>
     </Container>
   );
 }
@@ -378,7 +520,8 @@ function TrainPage() {
 function ChatBotPage() {
   const { t } = useTranslation();
   const theme = useTheme();
-  const [selectedModel, setSelectedModel] = React.useState('gpt-3.5-turbo');
+  const [selectedLLM, setSelectedLLM] = React.useState<'groq' | 'gemini'>('groq');
+  const [selectedModel, setSelectedModel] = React.useState(DEFAULT_MODELS['groq']);
   const [messages, setMessages] = React.useState<Array<{ role: 'user' | 'assistant', content: string }>>([]);
   const [input, setInput] = React.useState('');
   const [clipboard, setClipboard] = React.useState<string[]>([]);
@@ -388,35 +531,82 @@ function ChatBotPage() {
     { id: '3', title: 'Project Planning', messages: [] }
   ]);
   const [selectedChat, setSelectedChat] = React.useState<string | null>(null);
+  const [editingChatId, setEditingChatId] = React.useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = React.useState('');
+  const [selectedClipboard, setSelectedClipboard] = React.useState<number[]>([]);
+  const [selectedTrainedData, setSelectedTrainedData] = React.useState('');
+  const [trainedDataOptions, setTrainedDataOptions] = React.useState<{ value: string, label: string }[]>([]);
   const navigate = useNavigate();
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  React.useEffect(() => {
+    // Fetch datasets from backend
+    fetch('http://localhost:8000/list_datasets')
+      .then(res => res.json())
+      .then(data => {
+        if (data.datasets && Array.isArray(data.datasets)) {
+          const options = data.datasets.map((name: string) => ({ value: name, label: name }));
+          setTrainedDataOptions(options);
+          if (options.length > 0) setSelectedTrainedData(options[0].value);
+        }
+      })
+      .catch(() => {
+        setTrainedDataOptions([]);
+        setSelectedTrainedData('');
+      });
+  }, []);
+
+  React.useEffect(() => {
+    setSelectedModel(DEFAULT_MODELS[selectedLLM]);
+  }, [selectedLLM]);
+
+  const handleSend = async () => {
+    if (!input.trim() || !selectedTrainedData) return;
     const newMessage = { role: 'user' as const, content: input };
-    setMessages([...messages, newMessage]);
-    
+    setMessages(prev => [...prev, newMessage]);
     // Update chat history if a chat is selected
     if (selectedChat) {
-      setChatHistory(prev => prev.map(chat => 
-        chat.id === selectedChat 
+      setChatHistory(prev => prev.map(chat =>
+        chat.id === selectedChat
           ? { ...chat, messages: [...chat.messages, newMessage] }
           : chat
       ));
     }
-    
-    // Here you would make API call to get bot response
-    const botResponse = { role: 'assistant' as const, content: 'This is a sample response.' };
-    setMessages(prev => [...prev, botResponse]);
-    
-    // Update chat history with bot response
-    if (selectedChat) {
-      setChatHistory(prev => prev.map(chat => 
-        chat.id === selectedChat 
-          ? { ...chat, messages: [...chat.messages, botResponse] }
-          : chat
-      ));
+    // Make API call to backend
+    try {
+      const formData = new FormData();
+      formData.append('dataset_name', selectedTrainedData);
+      formData.append('query', input);
+      formData.append('llm', selectedLLM);
+      formData.append('model', selectedModel);
+      formData.append('top_k', '5');
+      // Add last 10 messages as chat history (excluding the new message)
+      const last10 = [...messages, newMessage].slice(-10);
+      formData.append('history', JSON.stringify(last10));
+      const response = await fetch('http://localhost:8000/chat_llm', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json();
+      let botContent = 'Sorry, no answer found.';
+      if (response.ok && data.result) {
+        botContent = data.result;
+      } else if (data.detail) {
+        botContent = data.detail;
+      }
+      const botResponse = { role: 'assistant' as const, content: botContent };
+      setMessages(prev => [...prev, botResponse]);
+      // Update chat history with bot response
+      if (selectedChat) {
+        setChatHistory(prev => prev.map(chat =>
+          chat.id === selectedChat
+            ? { ...chat, messages: [...chat.messages, botResponse] }
+            : chat
+        ));
+      }
+    } catch (err) {
+      const botResponse = { role: 'assistant' as const, content: 'Error contacting server.' };
+      setMessages(prev => [...prev, botResponse]);
     }
-    
     setInput('');
   };
 
@@ -439,6 +629,79 @@ function ChatBotPage() {
     setMessages([]);
   };
 
+  const handleDeleteChat = (chatId: string) => {
+    setChatHistory(prev => prev.filter(chat => chat.id !== chatId));
+    if (selectedChat === chatId) {
+      setSelectedChat(null);
+      setMessages([]);
+    }
+  };
+
+  const handleEditChatTitle = (chatId: string, currentTitle: string) => {
+    setEditingChatId(chatId);
+    setEditingTitle(currentTitle);
+  };
+
+  const handleEditTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEditingTitle(e.target.value);
+  };
+
+  const handleEditTitleBlur = (chatId: string) => {
+    setChatHistory(prev => prev.map(chat => chat.id === chatId ? { ...chat, title: editingTitle || chat.title } : chat));
+    setEditingChatId(null);
+    setEditingTitle('');
+  };
+
+  const handleAddToClipboard = (content: string) => {
+    setClipboard(prev => [...prev, content]);
+  };
+
+  const handleMergeClipboard = () => {
+    if (clipboard.length === 0) return;
+    const merged = clipboard.join('\n\n');
+    setClipboard([merged]);
+  };
+
+  const handleClipboardCheck = (index: number) => {
+    setSelectedClipboard(prev =>
+      prev.includes(index)
+        ? prev.filter(i => i !== index)
+        : [...prev, index]
+    );
+  };
+
+  const handleMergeSelectedClipboard = () => {
+    if (selectedClipboard.length < 2) return;
+    // Sort indices to preserve order
+    const sorted = [...selectedClipboard].sort((a, b) => a - b);
+    const merged = sorted.map(i => clipboard[i]).join('\n\n');
+    // Remove selected and insert merged at the position of the first selected
+    const newClipboard = clipboard.filter((_, i) => !sorted.includes(i));
+    newClipboard.splice(sorted[0], 0, merged);
+    setClipboard(newClipboard);
+    setSelectedClipboard([]);
+  };
+
+  const handleExportReplies = () => {
+    if (clipboard.length === 0) return;
+    const content = clipboard.join('\n\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'clipboard_replies.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Add a handler to delete a clipboard item
+  const handleDeleteClipboardItem = (index: number) => {
+    setClipboard(prev => prev.filter((_, i) => i !== index));
+    setSelectedClipboard(prev => prev.filter(i => i !== index).map(i => (i > index ? i - 1 : i)));
+  };
+
   return (
     <Box sx={{ display: 'flex', height: 'calc(100vh - 64px)', p: 2, gap: 2, maxWidth: '100vw', overflow: 'hidden', background: theme.palette.background.default }}>
       {/* Chat History Sidebar */}
@@ -456,22 +719,49 @@ function ChatBotPage() {
         </Box>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           {chatHistory.map((chat) => (
-            <Button
-              key={chat.id}
-              variant={selectedChat === chat.id ? 'contained' : 'text'}
-              onClick={() => handleChatSelect(chat.id)}
-              sx={{
-                justifyContent: 'flex-start',
-                textAlign: 'left',
-                background: selectedChat === chat.id ? 'var(--color1)' : 'transparent',
-                color: selectedChat === chat.id ? '#fff' : 'inherit',
-                '&:hover': {
-                  background: selectedChat === chat.id ? 'var(--color1)' : 'rgba(237, 179, 43, 0.1)',
-                }
-              }}
-            >
-              {chat.title}
-            </Button>
+            <Box key={chat.id} sx={{ display: 'flex', alignItems: 'center' }}>
+              <Button
+                variant={selectedChat === chat.id ? 'contained' : 'text'}
+                onClick={() => handleChatSelect(chat.id)}
+                sx={{
+                  flex: 1,
+                  justifyContent: 'flex-start',
+                  textAlign: 'left',
+                  background: selectedChat === chat.id ? 'var(--color1)' : 'transparent',
+                  color: selectedChat === chat.id ? '#fff' : 'inherit',
+                  '&:hover': {
+                    background: selectedChat === chat.id ? 'var(--color1)' : 'rgba(237, 179, 43, 0.1)',
+                  }
+                }}
+                disableRipple
+              >
+                {editingChatId === chat.id ? (
+                  <input
+                    type="text"
+                    value={editingTitle}
+                    autoFocus
+                    onChange={handleEditTitleChange}
+                    onBlur={() => handleEditTitleBlur(chat.id)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        handleEditTitleBlur(chat.id);
+                      }
+                    }}
+                    style={{ width: '90%', fontSize: 16, border: 'none', outline: 'none', background: 'transparent', color: '#fff' }}
+                  />
+                ) : (
+                  <span
+                    onClick={() => handleEditChatTitle(chat.id, chat.title)}
+                    style={{ cursor: 'pointer', flex: 1 }}
+                  >
+                    {chat.title}
+                  </span>
+                )}
+              </Button>
+              <IconButton size="small" onClick={() => handleDeleteChat(chat.id)} sx={{ ml: 1 }}>
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Box>
           ))}
         </Box>
       </Paper>
@@ -481,9 +771,49 @@ function ChatBotPage() {
         <Paper elevation={3} sx={{ flex: 1, p: 2, borderRadius: 2, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {/* Model Selection */}
           <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>{t('Select Trained Data')}</Typography>
             <select
+              value={selectedTrainedData}
+              onChange={e => setSelectedTrainedData(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 4,
+                border: '1px solid #ccc',
+                fontSize: 14,
+                width: 200,
+                marginBottom: 12
+              }}
+            >
+              {trainedDataOptions.map((opt: { value: string; label: string }) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </Box>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>{t('Select LLM')}</Typography>
+            <select
+              value={selectedLLM}
+              onChange={e => setSelectedLLM(e.target.value as 'groq' | 'gemini')}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 4,
+                border: '1px solid #ccc',
+                fontSize: 14,
+                width: 200,
+                marginBottom: 12
+              }}
+            >
+              {LLM_OPTIONS.map((opt: { value: string; label: string }) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </Box>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>{t('Select Model')}</Typography>
+            <input
+              type="text"
               value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
+              onChange={e => setSelectedModel(e.target.value)}
               style={{
                 padding: '8px 12px',
                 borderRadius: 4,
@@ -491,11 +821,7 @@ function ChatBotPage() {
                 fontSize: 14,
                 width: 200
               }}
-            >
-              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-              <option value="gpt-4">GPT-4</option>
-              <option value="claude">Claude</option>
-            </select>
+            />
           </Box>
 
           {/* Messages */}
@@ -516,10 +842,18 @@ function ChatBotPage() {
                     maxWidth: '70%',
                     background: message.role === 'user' ? 'var(--color1)' : theme.palette.background.paper,
                     color: message.role === 'user' ? '#fff' : theme.palette.text.primary,
-                    borderRadius: 2
+                    borderRadius: 2,
+                    position: 'relative',
+                    display: 'flex',
+                    alignItems: 'center'
                   }}
                 >
-                  <Typography>{message.content}</Typography>
+                  <Typography sx={{ flex: 1 }}>{message.content}</Typography>
+                  {message.role === 'assistant' && (
+                    <IconButton size="small" onClick={() => handleAddToClipboard(message.content)} sx={{ ml: 1 }} title="Add to Clipboard">
+                      <ArrowForwardIcon fontSize="small" />
+                    </IconButton>
+                  )}
                 </Paper>
               </Box>
             ))}
@@ -557,18 +891,64 @@ function ChatBotPage() {
         <Typography variant="h6" sx={{ mb: 2, color: 'var(--color1)' }}>{t('Clipboard')}</Typography>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
           {clipboard.map((item, index) => (
-            <Paper key={index} elevation={1} sx={{ p: 1, fontSize: 14 }}>
-              {item}
+            <Paper key={index} elevation={1} sx={{ p: 1, fontSize: 14, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Checkbox
+                size="small"
+                checked={selectedClipboard.includes(index)}
+                onChange={() => handleClipboardCheck(index)}
+                sx={{ p: 0, mr: 1 }}
+              />
+              <ContentPasteIcon fontSize="small" sx={{ mr: 1 }} />
+              <span style={{ flex: 1 }}>{item}</span>
+              <IconButton size="small" onClick={() => handleDeleteClipboardItem(index)} title="Delete">
+                <DeleteIcon fontSize="small" />
+              </IconButton>
             </Paper>
           ))}
         </Box>
         <Button
           variant="contained"
           fullWidth
-          sx={{ background: 'var(--color2)', color: '#222' }}
-          onClick={() => navigate('/export')}
+          sx={{ background: 'var(--color2)', color: '#222', mb: 1 }}
+          onClick={() => navigate('/agents')}
         >
-          {t('Proceed')}
+          {t('Go to Agents')}
+        </Button>
+        <Button
+          variant="outlined"
+          fullWidth
+          sx={{ color: 'var(--color1)', borderColor: 'var(--color1)' }}
+          onClick={handleMergeClipboard}
+          disabled={clipboard.length < 2}
+        >
+          {t('Merge All Messages')}
+        </Button>
+        <Button
+          variant="outlined"
+          fullWidth
+          sx={{ color: 'var(--color1)', borderColor: 'var(--color1)', mt: 1 }}
+          onClick={handleMergeSelectedClipboard}
+          disabled={selectedClipboard.length < 2}
+        >
+          {t('Merge Selected')}
+        </Button>
+        <Button
+          variant="contained"
+          fullWidth
+          sx={{ background: 'var(--color2)', color: '#222', mb: 1, mt: 1 }}
+          onClick={() => navigate('/agents', { state: { messages: selectedClipboard.map(i => clipboard[i]) } })}
+          disabled={selectedClipboard.length === 0}
+        >
+          {t('Go to Agents with Selected')}
+        </Button>
+        <Button
+          variant="contained"
+          fullWidth
+          sx={{ background: 'var(--color2)', color: '#222', mb: 1 }}
+          onClick={() => navigate('/export', { state: { clipboard } })}
+          disabled={clipboard.length === 0}
+        >
+          {t('Export Replies')}
         </Button>
       </Paper>
     </Box>
@@ -579,11 +959,76 @@ function ExportPage() {
   const { t } = useTranslation();
   const theme = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
   const [selectedFormat, setSelectedFormat] = React.useState('pdf');
+  const [selectedLLM, setSelectedLLM] = React.useState<'groq' | 'gemini'>('groq');
+  const [summary, setSummary] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  // Get clipboard data from navigation state
+  const clipboard = (location.state && location.state.clipboard) || [];
 
-  const handleExport = () => {
-    // Here you would handle the export based on selectedFormat
-    console.log(`Exporting as ${selectedFormat}`);
+  const getExportText = () => clipboard.join('\n\n');
+  const getSummaryText = () => summary || '';
+
+  const handleExport = (useSummary = false) => {
+    const text = useSummary && summary ? getSummaryText() : getExportText();
+    if (selectedFormat === 'pdf') {
+      const doc = new jsPDF();
+      const lines = doc.splitTextToSize(text, 180);
+      doc.text(lines, 10, 10);
+      doc.save(useSummary ? 'summary.pdf' : 'exported_content.pdf');
+    } else if (selectedFormat === 'doc' || selectedFormat === 'docx') {
+      const doc = new Document({
+        sections: [
+          {
+            properties: {},
+            children: [
+              ...(useSummary && summary
+                ? [new Paragraph({ children: [new TextRun(getSummaryText())] })]
+                : clipboard.map((item: string) => new Paragraph({ children: [new TextRun(item)] }))),
+            ],
+          },
+        ],
+      });
+      Packer.toBlob(doc).then((blob) => {
+        saveAs(blob, useSummary ? 'summary.docx' : 'exported_content.docx');
+      });
+    } else if (selectedFormat === 'txt') {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      saveAs(blob, useSummary ? 'summary.txt' : 'exported_content.txt');
+    } else if (selectedFormat === 'json') {
+      const blob = new Blob([
+        useSummary && summary ? JSON.stringify({ summary }, null, 2) : JSON.stringify(clipboard, null, 2)
+      ], { type: 'application/json' });
+      saveAs(blob, useSummary ? 'summary.json' : 'exported_content.json');
+    }
+  };
+
+  const handleSummarize = async () => {
+    setLoading(true);
+    setError(null);
+    setSummary(null);
+    try {
+      const formData = new FormData();
+      formData.append('content', getExportText());
+      formData.append('llm', selectedLLM);
+      // Optionally, allow model selection
+      // formData.append('model', '');
+      const response = await fetch('http://localhost:8000/summarize_content', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json();
+      if (response.ok && data.result) {
+        setSummary(data.result);
+      } else {
+        setError(data.result || 'Summarization failed.');
+      }
+    } catch (err) {
+      setError('Summarization error: ' + err);
+    }
+    setLoading(false);
   };
 
   return (
@@ -617,6 +1062,42 @@ function ExportPage() {
           </Box>
         </Paper>
 
+        {/* LLM Selection */}
+        <Paper elevation={3} sx={{ p: 3, borderRadius: 2 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>{t('Summarization Options')}</Typography>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <Typography>{t('Select LLM')}:</Typography>
+            <select
+              value={selectedLLM}
+              onChange={e => setSelectedLLM(e.target.value as 'groq' | 'gemini')}
+              style={{ padding: '8px 12px', borderRadius: 4, border: '1px solid #ccc', fontSize: 14 }}
+            >
+              <option value="groq">Groq</option>
+              <option value="gemini">Gemini</option>
+            </select>
+            <Button
+              variant="contained"
+              startIcon={<span>📝</span>}
+              sx={{ background: 'var(--color2)', color: '#222' }}
+              onClick={handleSummarize}
+              disabled={loading}
+            >
+              {loading ? t('Summarizing...') : t('Summarize Content')}
+            </Button>
+            {summary && (
+              <Button
+                variant="contained"
+                startIcon={<span>📥</span>}
+                sx={{ background: 'var(--color1)', color: '#fff' }}
+                onClick={() => handleExport(true)}
+              >
+                {t(`Download Summary (${selectedFormat.toUpperCase()})`)}
+              </Button>
+            )}
+          </Box>
+          {error && <Typography color="error" sx={{ mt: 2 }}>{error}</Typography>}
+        </Paper>
+
         {/* Export Options */}
         <Paper elevation={3} sx={{ p: 3, borderRadius: 2 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>{t('Export Options')}</Typography>
@@ -625,25 +1106,9 @@ function ExportPage() {
               variant="contained"
               startIcon={<span>📥</span>}
               sx={{ background: 'var(--color1)', color: '#fff' }}
-              onClick={handleExport}
+              onClick={() => handleExport(false)}
             >
               {t(`Download ${selectedFormat.toUpperCase()}`)}
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<span>📝</span>}
-              sx={{ background: 'var(--color2)', color: '#222' }}
-              onClick={handleExport}
-            >
-              {t('Summarize Content')}
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<span>🤖</span>}
-              sx={{ background: '#222', color: '#fff' }}
-              onClick={() => navigate('/agents')}
-            >
-              {t('Use AI Agents')}
             </Button>
           </Box>
         </Paper>
@@ -660,9 +1125,17 @@ function ExportPage() {
             maxHeight: 300,
             overflowY: 'auto'
           }}>
-            <Typography color="text.secondary">
-              {t('Preview of your exported content will appear here...')}
-            </Typography>
+            {summary ? (
+              <Typography color="text.primary" sx={{ mb: 1, whiteSpace: 'pre-line' }}>{summary}</Typography>
+            ) : clipboard.length > 0 ? (
+              clipboard.map((item: string, idx: number) => (
+                <Typography key={idx} color="text.primary" sx={{ mb: 1 }}>{item}</Typography>
+              ))
+            ) : (
+              <Typography color="text.secondary">
+                {t('Preview of your exported content will appear here...')}
+              </Typography>
+            )}
           </Box>
         </Paper>
       </Box>
@@ -675,24 +1148,99 @@ function AgentsPage() {
   const theme = useTheme();
   const agents = [
     {
-      name: t('Research Agent'),
-      description: t('Conducts in-depth research on specific topics'),
-      icon: '🔍'
+      name: 'Document Extractor Agent',
+      icon: '🔎',
+      description: `Extracts tables, bullet points, forms, or key values from the source documents used by the RAG bot.
+
+Use cases:
+- Contracts -> clause extraction
+- Invoices -> line items and totals
+- PDFs -> structured data (CSV, JSON)
+Tech: LayoutLM, pdfplumber, Tesseract, GPT+RAG with schema output`
     },
     {
-      name: t('Analysis Agent'),
-      description: t('Analyzes data and provides insights'),
-      icon: '📊'
+      name: 'Calendar or Scheduler Agent',
+      icon: '📅',
+      description: `Parses dates, times, and events from the conversation and schedules or books appointments.
+
+Use cases:
+- "Book a meeting next Monday at 3pm with John"
+- "Schedule monthly report review"
+Tools: Google Calendar API, Outlook API, LangChain ToolAgent`
     },
     {
-      name: t('Writing Agent'),
-      description: t('Helps with content creation and writing'),
-      icon: '✍️'
+      name: 'Form Filler Agent',
+      icon: '📥',
+      description: `Uses the conversation and retrieved documents to autofill complex forms, reports, or templates.
+
+Example:
+- "Generate a draft NDA from this clause"
+- "Fill the tax form from my financial report"
+Output: Pre-filled PDF or HTML form`
     },
     {
-      name: t('Summary Agent'),
-      description: t('Creates concise summaries of long content'),
-      icon: '📝'
+      name: 'Report Generator Agent',
+      icon: '🧾',
+      description: `Generates reports (daily/weekly summaries, financial statements, etc.) from raw or retrieved data.
+
+Input: Metrics from logs, finance docs, etc.
+Output: Markdown, PDF, Word, or HTML summary reports`
+    },
+    {
+      name: 'File Organizer / Indexing Agent',
+      icon: '📂',
+      description: `Takes large unstructured docs (contracts, logs, product manuals) and:
+- Classifies
+- Tags
+- Generates titles & summaries
+- Creates internal metadata for future retrieval`
+    },
+    {
+      name: 'Workflow Executor Agent',
+      icon: '🛠️',
+      description: `Chains tasks like:
+- "Summarize this -> extract names -> send email"
+- "Parse spreadsheet -> update CRM"
+- "Detect anomaly -> log issue -> notify team"
+Uses: LangGraph or LangChain MultiTool Agent`
+    },
+    {
+      name: 'Email Composer & Sender Agent',
+      icon: '📧',
+      description: `Understands intent and generates full emails with subject lines and body.
+
+Input: "Tell HR I'm out on Thursday"
+Output: Draft email or directly sends via Gmail/M365 API`
+    },
+    {
+      name: 'Code Generator & Executor Agent',
+      icon: '🧑‍💻',
+      description: `Generates scripts or SQL queries based on a doc, runs them, and returns output.
+
+Use case:
+- "Write SQL to get top-selling products from this sales log"
+- "Generate Python code to analyze this CSV"
+Uses: Code interpreter, sandboxed environments (Replit, Modal, Docker)`
+    },
+    {
+      name: 'Data Visualizer Agent',
+      icon: '📊',
+      description: `Generates interactive or static charts, graphs, or dashboards from tabular or text-based inputs.
+
+Use case:
+- "Show a pie chart of expenses from this PDF"
+- "Trend line from this Excel"
+Tech: Plotly, Matplotlib, Vega-Lite, Streamlit`
+    },
+    {
+      name: 'Compliance / Policy Checker Agent',
+      icon: '🔐',
+      description: `Checks retrieved content or user input against policies, standards, or regulations.
+
+Use case:
+- "Is this privacy policy GDPR-compliant?"
+- "Check for HIPAA violations in this medical log"
+Method: Use LLM + semantic rules + retrieval of laws/guidelines`
     }
   ];
 
